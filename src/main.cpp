@@ -125,8 +125,12 @@ void loop()
       stringComplete = false;
     }
   }
-  stepperX.run();
-  stepperY.run();
+  if (stepperX.distanceToGo() != 0) {
+    stepperX.run();
+  }
+  if (stepperY.distanceToGo() != 0) {
+    stepperY.run();
+  }
 }
 
 void serialEvent() {
