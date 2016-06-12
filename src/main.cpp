@@ -4,8 +4,6 @@
 
 AccelStepper stepperX(AccelStepper::FULL4WIRE, 2,3,4,5);
 AccelStepper stepperY(AccelStepper::FULL4WIRE, 6,7,8,9);
-String inputString = "";         // a string to hold incoming data
-boolean stringComplete = false;  // whether the string is complete
 int stepperYCalibrationPin = 0;
 int stepperXCalibrationPin = 1;
 int yCalibrationThreshold = 800;
@@ -15,7 +13,8 @@ long xZeroValue;
 bool isCalibrated = false;
 bool isXCalibrated = false;
 bool isYCalibrated = false;
-StaticJsonBuffer<500> jsonBuffer;
+bool isWorking = false;
+String readString = "";
 
 bool isYZeroed() {
   if (analogRead(stepperYCalibrationPin) > yCalibrationThreshold) {
@@ -95,50 +94,66 @@ void setup()
    stepperY.setMaxSpeed(1000);
    stepperY.setSpeed(150);
    stepperY.setAcceleration(150);
-   inputString.reserve(500);
-   Serial.begin(115200);
+   Serial.begin(9600);
+}
+
+void printHealthcheck() {
+  Serial.print("{");
+  Serial.print("\"x\":");
+  Serial.print(stepperX.currentPosition());
+  Serial.print(",\"y\":");
+  Serial.print(stepperY.currentPosition());
+  Serial.print(",\"id\":");
+  Serial.print("\"healthCheck\"");
+  Serial.println("}\n");
 }
 
 void loop()
 {
-  if (!isCalibrated) {
-    calibrate();
-  }
-  else {
-    if (stringComplete) {
-      JsonObject& positionData = jsonBuffer.parseObject(inputString);
-      if(!positionData.success()) {
-        Serial.print("JSON Parse Failure: ");
-        Serial.println(inputString);
-        inputString = "";
+    while (Serial.available() > 0) {
+      if (!isCalibrated) {
+        calibrate();
+      }
+      char received = Serial.read();
+      if (received != '\n') {
+        readString += received;
       }
       else {
-        if (positionData.containsKey("home")){
-          goHome();
+        if (readString.length() > 0) {
+          Serial.print("Data Received: ");
+          Serial.println(readString);
+          StaticJsonBuffer<400> jsonBuffer;
+          JsonObject& data = jsonBuffer.parseObject(readString);
+          if (!data.success()) {
+            printHealthcheck();
+          }
+          else {
+            if (isWorking){
+              Serial.write("{\"status\": \"working\"}\n");
+            }
+            else {
+              isWorking = true;
+              if (data.containsKey("home")){
+                goHome();
+              }
+              else {
+                setX(data["x"]);
+                setY(data["y"]);
+              }
+            }
+          }
         }
-        else {
-          setX(positionData["x"]);
-          setY(positionData["y"]);
-        }
-      inputString = "";
+        readString = "";
       }
-      stringComplete = false;
+    if (stepperX.distanceToGo() != 0) {
+      stepperX.run();
     }
-  }
-  if (stepperX.distanceToGo() != 0) {
-    stepperX.run();
-  }
-  if (stepperY.distanceToGo() != 0) {
-    stepperY.run();
-  }
-}
-
-void serialEvent() {
-  while (Serial.available()) {
-    char inChar = (char)Serial.read();
-    inputString += inChar;
-    if (inChar == '\n') {
-      stringComplete = true;
+    if (stepperY.distanceToGo() != 0) {
+      stepperY.run();
+    }
+    if(stepperY.distanceToGo() == 0 && stepperX.distanceToGo() == 0 && isWorking){
+      Serial.write("{\"status\": \"complete\"}\n");
+      isWorking = false;
     }
   }
 }
